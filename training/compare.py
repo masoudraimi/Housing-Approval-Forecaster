@@ -17,11 +17,10 @@ from models.registry import promote_to_champion
 
 load_dotenv()
 
-FEATURES_PATH = Path("data/processed/features.parquet")
-TRAIN_END = "2021Q4"
-VAL_END = "2022Q2"
+FEATURES_PATH = Path("data/raw/approvals_clean.parquet")
+TRAIN_END = "2022Q2"
 TEST_START = "2022Q3"
-HORIZON = 4
+HORIZON = 1
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "housing-forecast-lstm")
 
 
@@ -45,12 +44,16 @@ def compare_models(features_path: Path = FEATURES_PATH) -> None:
         lga_df = df[df["lga_code"] == lga].sort_values("quarter")
         y_tr = lga_df[lga_df["quarter"] <= TRAIN_END]["dwellings_approved"]
         y_te = lga_df[lga_df["quarter"] >= TEST_START]["dwellings_approved"]
-        if len(y_tr) < 8 or len(y_te) == 0:
+        if len(y_tr) < 1 or len(y_te) == 0:
             continue
         sm = SeasonalMeanBaseline().fit(y_tr)
         n = min(len(y_te), HORIZON)
         sm_pred_all.extend(sm.predict(n))
         sm_true.extend(y_te.values[:n])
+
+    if not sm_true:
+        print("No LGAs had sufficient data for comparison — check TRAIN_END/TEST_START constants.")
+        return
 
     sm_mae = mean_absolute_error(sm_true, sm_pred_all)
     sm_mape = mean_absolute_percentage_error(sm_true, sm_pred_all)

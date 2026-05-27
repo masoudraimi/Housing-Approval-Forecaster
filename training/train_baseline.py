@@ -16,10 +16,10 @@ from models.registry import register_model
 
 load_dotenv()
 
-FEATURES_PATH = Path("data/processed/features.parquet")
-TRAIN_END = "2021Q4"
-VAL_END = "2022Q2"
-HORIZON = 4
+FEATURES_PATH = Path("data/raw/approvals_clean.parquet")
+TRAIN_END = "2022Q2"
+VAL_END = "2023Q2"
+HORIZON = 1
 SEASONAL_MODEL_NAME = os.getenv("MLFLOW_BASELINE_NAME", "housing-forecast-baseline")
 
 
@@ -41,10 +41,10 @@ def train_baselines(features_path: Path = FEATURES_PATH) -> None:
 
     for lga in lgas:
         lga_df = df[df["lga_code"] == lga].sort_values("quarter")
-        y_train = lga_df[train_mask & (df["lga_code"] == lga)]["dwellings_approved"]
-        y_val = lga_df[val_mask & (df["lga_code"] == lga)]["dwellings_approved"]
+        y_train = lga_df.loc[lga_df["quarter"] <= TRAIN_END, "dwellings_approved"]
+        y_val = lga_df.loc[(lga_df["quarter"] > TRAIN_END) & (lga_df["quarter"] <= VAL_END), "dwellings_approved"]
 
-        if len(y_train) < 8 or len(y_val) == 0:
+        if len(y_train) < 1 or len(y_val) == 0:
             continue
 
         sm = SeasonalMeanBaseline(n_years=3).fit(y_train)
@@ -65,6 +65,10 @@ def train_baselines(features_path: Path = FEATURES_PATH) -> None:
     all_true = np.array(all_true)
     sm_preds = np.array(sm_preds)
     sarima_preds = np.array(sarima_preds)
+
+    if len(all_true) == 0:
+        print("No LGAs had sufficient data for evaluation — check TRAIN_END/VAL_END constants.")
+        return
 
     mlflow.set_experiment("housing-approvals-baselines")
 

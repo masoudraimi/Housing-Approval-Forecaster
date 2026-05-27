@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Select-String -Pattern \"^\\(Seasonal|SARIMA|No LGA|Traceback|ValueError|Error\\)\")",
+      "Bash(Select-Object -Last 20)"
+    ]
+  }
+}

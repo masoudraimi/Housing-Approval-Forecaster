@@ -36,7 +36,7 @@ def _load_cash_rate(path: Optional[Path] = None) -> pd.DataFrame:
 def build_features(
     approvals_df: pd.DataFrame,
     cash_rate_df: pd.DataFrame,
-    n_lags: int = 4,
+    n_lags: int = 2,
 ) -> pd.DataFrame:
     """Construct the modelling feature set from raw input frames.
 
@@ -99,6 +99,7 @@ def build_features(
         df["population_growth_yoy"] = 0.0
 
     # Final column selection
+    lag_cols = [f"approvals_lag{i}" for i in range(1, n_lags + 1)]
     feature_cols = [
         "lga_code",
         "lga_name",
@@ -109,10 +110,7 @@ def build_features(
         "cash_rate_lag2",
         "construction_cost_yoy",
         "population_growth_yoy",
-        "approvals_lag1",
-        "approvals_lag2",
-        "approvals_lag3",
-        "approvals_lag4",
+        *lag_cols,
         "approvals_yoy",
         "season_q1",
         "season_q2",
@@ -121,7 +119,8 @@ def build_features(
         "post_rate_hike",
     ]
     available = [c for c in feature_cols if c in df.columns]
-    df = df[available].dropna(subset=["approvals_lag4"]).reset_index(drop=True)
+    last_lag = f"approvals_lag{n_lags}"
+    df = df[available].dropna(subset=[last_lag]).reset_index(drop=True)
     return df
 
 

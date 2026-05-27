@@ -21,10 +21,9 @@ from models.registry import register_model
 load_dotenv()
 
 FEATURES_PATH = Path("data/processed/features.parquet")
-TRAIN_END = "2021Q4"
-VAL_END = "2022Q2"
-HORIZON = 4
-SEQ_LEN = 12
+TRAIN_FRAC = 0.8   # LGA-based split (no temporal split: 1 obs per LGA)
+HORIZON = 1
+SEQ_LEN = 1        # cross-sectional: each LGA is one sample, no temporal window
 HIDDEN_SIZE = 64
 NUM_LAYERS = 2
 LR = 1e-3
@@ -56,10 +55,14 @@ def _hit_rate(y_true: np.ndarray, y_pred: np.ndarray, tolerance: float = 0.15) -
 
 def train_lstm(features_path: Path = FEATURES_PATH) -> None:
     df = pd.read_parquet(features_path)
-    df["quarter"] = pd.PeriodIndex(df["quarter"], freq="Q")
 
-    train_mask = df["quarter"] <= TRAIN_END
-    val_mask = (df["quarter"] > TRAIN_END) & (df["quarter"] <= VAL_END)
+    lgas = df["lga_code"].unique()
+    rng = np.random.default_rng(42)
+    rng.shuffle(lgas)
+    n_train = int(len(lgas) * TRAIN_FRAC)
+    train_lgas = set(lgas[:n_train])
+    train_mask = df["lga_code"].isin(train_lgas)
+    val_mask = ~train_mask
 
     available_features = [c for c in FEATURE_COLS if c in df.columns]
     X_train_raw = df[train_mask][available_features].values.astype(np.float32)
@@ -98,7 +101,7 @@ def train_lstm(features_path: Path = FEATURES_PATH) -> None:
             "max_epochs": MAX_EPOCHS,
             "patience": PATIENCE,
             "features": available_features,
-            "train_end": TRAIN_END,
+            "train_frac": TRAIN_FRAC,
         })
 
         history = lstm_fit(
