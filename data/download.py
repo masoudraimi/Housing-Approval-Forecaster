@@ -12,14 +12,9 @@ RAW_DIR = Path(__file__).parent / "raw"
 
 # ABS time series URLs (direct CSV download endpoints)
 _ABS_8731_URL = (
-    "https://www.abs.gov.au/statistics/industry/building-and-construction/"
-    "building-approvals-australia/latest-release/8731016.xlsx"
+    "https://api.data.abs.gov.au/files/ABS_ABS_REGIONAL_LGA2021_1.2.0.csv"
 )
 _RBA_CASH_RATE_URL = "https://www.rba.gov.au/statistics/tables/csv/f1-data.csv"
-
-# Fallback: ABS API base for table downloads
-_ABS_API_BASE = "https://api.data.abs.gov.au/data"
-
 
 def _get(url: str, timeout: int = 30) -> bytes:
     """Fetch URL content with a basic retry on timeout."""
