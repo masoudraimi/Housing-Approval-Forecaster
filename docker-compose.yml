@@ -1,0 +1,39 @@
+services:
+  mlflow:
+    image: python:3.11-slim
+    command: >
+      sh -c "pip install mlflow && mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root /mlartifacts"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow.db
+      - mlflow_artifacts:/mlartifacts
+    env_file: .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mlflow_data:
+  mlflow_artifacts:

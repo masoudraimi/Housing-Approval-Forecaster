@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+uv.lock
+
+# Environment variables
+.env
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Data — raw downloads are large and should not be committed
+data/raw/
+data/processed/
+# Keep the sample file for CI
+!data/raw/sample_features.parquet
+
+# Notebooks
+.ipynb_checkpoints/
+
+# SQLite databases
+*.db
+
+# Model artefacts
+*.pkl
+*.pt
+*.pth
+
+# Matplotlib output
+*.png
+*.pdf
+reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
