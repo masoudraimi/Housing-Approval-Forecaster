@@ -1,12 +1,10 @@
 """Feature engineering pipeline: merges ABS + RBA data into features.parquet."""
-
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional
-
 import numpy as np
 import pandas as pd
+from data.download import load_rba_cash_rate
 
 RAW_DIR = Path(__file__).parent / "raw"
 PROCESSED_DIR = Path(__file__).parent / "processed"
@@ -29,14 +27,14 @@ def _load_cash_rate(path: Optional[Path] = None) -> pd.DataFrame:
     """Load quarterly RBA cash rate series."""
     if path is None:
         path = RAW_DIR / "rba_cash_rate.csv"
-    from data.download import load_rba_cash_rate
+    
     return load_rba_cash_rate(path)
 
 
 def build_features(
     approvals_df: pd.DataFrame,
     cash_rate_df: pd.DataFrame,
-    n_lags: int = 2,
+    n_lags: int = 1,
 ) -> pd.DataFrame:
     """Construct the modelling feature set from raw input frames.
 
@@ -77,10 +75,12 @@ def build_features(
     df = df.merge(cash_rate_df.rename(columns={"quarter": "quarter_dt_merge"}),
                   left_on="quarter_dt", right_on="quarter_dt_merge", how="left")
 
-    # Rate lags
+    # Rate lags — look up directly from the full RBA series so early rows
+    # get historical rates rather than NaN from within-window shifting
+    _cr = cash_rate_df.set_index("quarter")["cash_rate"]
     df = df.sort_values(["lga_code", "quarter_dt"])
-    df["cash_rate_lag1"] = df.groupby("lga_code")["cash_rate"].shift(1)
-    df["cash_rate_lag2"] = df.groupby("lga_code")["cash_rate"].shift(2)
+    df["cash_rate_lag1"] = df["quarter_dt"].map(lambda ts: _cr.get(ts - pd.DateOffset(years=1)))
+    df["cash_rate_lag2"] = df["quarter_dt"].map(lambda ts: _cr.get(ts - pd.DateOffset(years=2)))
 
     # Structural break indicator: 1 from Q3 2022 onward
     break_ts = _RATE_HIKE_START.to_timestamp()

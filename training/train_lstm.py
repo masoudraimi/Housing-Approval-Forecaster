@@ -34,9 +34,7 @@ MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "housing-forecast-lstm")
 
 FEATURE_COLS = [
     "approvals_lag1",
-    "approvals_lag2",
-    "approvals_lag3",
-    "approvals_lag4",
+    "cash_rate",
     "cash_rate_lag1",
     "cash_rate_lag2",
     "construction_cost_yoy",

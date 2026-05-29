@@ -9,13 +9,14 @@ import requests
 
 RAW_DIR = Path(__file__).parent / "raw"
 
-# Full ABS Regional LGA2021 dataset (SDMX flat CSV, all measures)
-_ABS_REGIONAL_CSV_URL = (
-    "https://api.data.abs.gov.au/files/ABS_ABS_REGIONAL_LGA2021_1.2.0.csv"
+# ABS Regional datasets: LGA2020 covers FY2010-11→2019-20, LGA2021 covers FY2020-21→present
+_ABS_REGIONAL_LGA2020_CSV_URL = "https://data.api.abs.gov.au/files/ABS_ABS_REGIONAL_LGA2020_1.2.0.csv"
+_ABS_REGIONAL_LGA2021_CSV_URL = (
+    "https://data.api.abs.gov.au/rest/data/ABS,ABS_REGIONAL_LGA2021,1.6.0/all?dimensionAtObservation=AllDimensions&format=csvfilewithlabels"
 )
 
+
 # Measure code for total dwelling units in ABS_REGIONAL_LGA2021.
-# BUILDING_4 = "Total dwelling units (no.)" per the SDMX ContentConstraint.
 _BUILDING_APPROVALS_MEASURE = "BUILDING_4"
 
 _RBA_CASH_RATE_URL = "https://www.rba.gov.au/statistics/tables/csv/f1-data.csv"
@@ -36,12 +37,11 @@ def download_rba_cash_rate(out_dir: Path = RAW_DIR) -> Path:
     return out_path
 
 
-def download_abs_building_approvals(out_dir: Path = RAW_DIR) -> Path:
-    """Download ABS Regional LGA2021 full CSV to out_dir."""
+def _download_abs_csv(url: str, filename: str, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "abs_regional_lga2021.csv"
-    out_path.write_bytes(_get(_ABS_REGIONAL_CSV_URL, timeout=120))
-    print(f"Downloaded ABS Regional LGA2021 -> {out_path}")
+    out_path = out_dir / filename
+    out_path.write_bytes(_get(url, timeout=120))
+    print(f"Downloaded {filename} -> {out_path}")
     return out_path
 
 
@@ -63,7 +63,7 @@ def load_rba_cash_rate(path: Path) -> pd.DataFrame:
 
 
 def load_abs_building_approvals(path: Path) -> pd.DataFrame:
-    """Parse ABS Regional LGA2021 SDMX flat CSV into a long-format DataFrame.
+    """Parse an ABS Regional LGA CSV (LGA2020 or LGA2021) into a long-format DataFrame.
 
     Filters to the building approvals measure (_BUILDING_APPROVALS_MEASURE) and
     returns columns: lga_code (str), lga_name (str), quarter (pd.Period Q-JUN),
@@ -118,11 +118,23 @@ def download_all(out_dir: Path = RAW_DIR) -> None:
     print("Downloading RBA cash rate...")
     download_rba_cash_rate(out_dir)
 
-    print("Downloading ABS Regional LGA2021 CSV (this may take a moment)...")
-    raw_path = download_abs_building_approvals(out_dir)
+    print("Downloading ABS Regional LGA2020 CSV (FY2010-11 to FY2019-20)...")
+    path_2020 = _download_abs_csv(_ABS_REGIONAL_LGA2020_CSV_URL, "abs_regional_lga2020.csv", out_dir)
 
-    print("Parsing building approvals...")
-    approvals = load_abs_building_approvals(raw_path)
+    print("Downloading ABS Regional LGA2021 CSV (FY2020-21 to present)...")
+    path_2021 = _download_abs_csv(_ABS_REGIONAL_LGA2021_CSV_URL, "abs_regional_lga2021.csv", out_dir)
+
+    print("Parsing and consolidating building approvals...")
+    approvals = pd.concat(
+        [load_abs_building_approvals(path_2020), load_abs_building_approvals(path_2021)],
+        ignore_index=True,
+    )
+    approvals = (
+        approvals
+        .drop_duplicates(subset=["lga_code", "quarter"])
+        .sort_values(["lga_code", "quarter"])
+        .reset_index(drop=True)
+    )
     parquet_path = out_dir / "approvals_clean.parquet"
     approvals.to_parquet(parquet_path, index=False)
     print(f"Saved approvals_clean.parquet -> {parquet_path}  ({len(approvals):,} rows)")
