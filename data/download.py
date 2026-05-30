@@ -1,8 +1,10 @@
-"""Download ABS building approvals, RBA cash rate, PPI, and ERP data to data/raw/."""
+"""Download ABS building approvals, population (ERP), and ABS PPI data to data/raw/."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import requests
@@ -12,29 +14,25 @@ RAW_DIR = Path(__file__).parent / "raw"
 # ABS Regional datasets: LGA2020 covers FY2010-11→2019-20, LGA2021 covers FY2020-21→present
 _ABS_REGIONAL_LGA2020_CSV_URL = "https://data.api.abs.gov.au/files/ABS_ABS_REGIONAL_LGA2020_1.2.0.csv"
 _ABS_REGIONAL_LGA2021_CSV_URL = (
-    "https://data.api.abs.gov.au/rest/data/ABS,ABS_REGIONAL_LGA2021,1.6.0/all?dimensionAtObservation=AllDimensions&format=csvfilewithlabels"
+    "https://data.api.abs.gov.au/rest/data/ABS,ABS_REGIONAL_LGA2021,1.6.0/all"
+    "?dimensionAtObservation=AllDimensions&format=csvfilewithlabels"
 )
 
-
-# Measure code for total dwelling units in ABS_REGIONAL_LGA2021.
 _BUILDING_APPROVALS_MEASURE = "BUILDING_4"
+_POPULATION_MEASURE = "ERP_P_20"  # Estimated Resident Population: Persons (no.)
 
-_RBA_CASH_RATE_URL = "https://www.rba.gov.au/statistics/tables/csv/f1-data.csv"
+# ABS PPI Table 17: Output of Construction Industries (quarterly, national)
+# URL resolves from the "latest-release" redirect; update the date segment if needed.
+_ABS_PPI_CONSTRUCTION_URL = (
+    "https://www.abs.gov.au/statistics/economy/price-indexes-and-inflation/"
+    "producer-price-indexes-australia/latest-release/6427017.xlsx"
+)
 
 
 def _get(url: str, timeout: int = 30) -> bytes:
     response = requests.get(url, timeout=timeout, allow_redirects=True)
     response.raise_for_status()
     return response.content
-
-
-def download_rba_cash_rate(out_dir: Path = RAW_DIR) -> Path:
-    """Download RBA monthly cash rate target CSV to out_dir/rba_cash_rate.csv."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "rba_cash_rate.csv"
-    out_path.write_bytes(_get(_RBA_CASH_RATE_URL))
-    print(f"Downloaded RBA cash rate -> {out_path}")
-    return out_path
 
 
 def _download_abs_csv(url: str, filename: str, out_dir: Path) -> Path:
@@ -45,62 +43,33 @@ def _download_abs_csv(url: str, filename: str, out_dir: Path) -> Path:
     return out_path
 
 
-def load_rba_cash_rate(path: Path) -> pd.DataFrame:
-    """Parse downloaded RBA cash rate CSV into a quarterly mean series.
+def _load_abs_regional(path: Path, measure: str, value_col: str) -> pd.DataFrame:
+    """Generic parser for ABS Regional LGA CSVs.
 
-    Returns columns: quarter (pd.Period), cash_rate.
-    """
-    raw = pd.read_csv(path, skiprows=10, header=0)
-    df = raw.iloc[:, :2].copy()
-    df.columns = ["date", "cash_rate"]
-    df = df.dropna(subset=["cash_rate"])
-    df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
-    df = df.dropna(subset=["date"])
-    df["cash_rate"] = pd.to_numeric(df["cash_rate"], errors="coerce")
-    df = df.dropna(subset=["cash_rate"])
-    df["quarter"] = df["date"].dt.to_period("Q")
-    return df.groupby("quarter")["cash_rate"].mean().reset_index()
-
-
-def load_abs_building_approvals(path: Path) -> pd.DataFrame:
-    """Parse an ABS Regional LGA CSV (LGA2020 or LGA2021) into a long-format DataFrame.
-
-    Filters to the building approvals measure (_BUILDING_APPROVALS_MEASURE) and
-    returns columns: lga_code (str), lga_name (str), quarter (pd.Period Q-JUN),
-    dwellings_approved (float).
-
-    ABS Regional data is published by financial year (e.g. "2020-21").
-    Each observation maps to Q2 of the ending calendar year to align with the
-    Australian June financial year-end.
+    Filters to *measure* and returns lga_code, quarter (pd.Period Q-JUN), and value_col.
+    Financial-year strings like "2020-21" map to Q2 of the end calendar year (2021Q2).
     """
     df = pd.read_csv(path, dtype=str)
     df.columns = [c.strip().upper() for c in df.columns]
 
-    # Identify the LGA dimension column
     lga_col = next((c for c in df.columns if c.startswith("LGA")), None)
     if lga_col is None:
-        raise ValueError(
-            f"No LGA column found in {path}.\nAvailable columns: {list(df.columns)}"
-        )
+        raise ValueError(f"No LGA column in {path}. Columns: {list(df.columns)}")
 
-    # Filter to building approvals measure
     if "MEASURE" in df.columns:
         available = df["MEASURE"].unique()
-        if _BUILDING_APPROVALS_MEASURE not in available:
+        if measure not in available:
             raise ValueError(
-                f"Measure '{_BUILDING_APPROVALS_MEASURE}' not found.\n"
-                f"Available measures: {sorted(available)}\n"
-                f"Update _BUILDING_APPROVALS_MEASURE in download.py."
+                f"Measure '{measure}' not found in {path.name}. "
+                f"Available: {sorted(available)}"
             )
-        df = df[df["MEASURE"] == _BUILDING_APPROVALS_MEASURE]
+        df = df[df["MEASURE"] == measure]
 
     df = df[[lga_col, "TIME_PERIOD", "OBS_VALUE"]].copy()
-    df.columns = ["lga_code", "period_str", "dwellings_approved"]
-    df["dwellings_approved"] = pd.to_numeric(df["dwellings_approved"], errors="coerce")
-    df = df.dropna(subset=["dwellings_approved", "lga_code"])
+    df.columns = ["lga_code", "period_str", value_col]
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+    df = df.dropna(subset=[value_col, "lga_code"])
 
-    # Financial year "2020-21" → Q2 of end year (2021Q2 = Jun 2021)
-    # Plain year "2020" → 2020Q2
     def _to_period(s: str) -> pd.Period:
         s = str(s).strip()
         end_year = int(s.split("-")[0]) + 1 if "-" in s else int(s)
@@ -108,22 +77,113 @@ def load_abs_building_approvals(path: Path) -> pd.DataFrame:
 
     df["quarter"] = df["period_str"].apply(_to_period)
     df["lga_code"] = df["lga_code"].astype(str).str.extract(r"(\d+)")[0]
-    df["lga_name"] = df["lga_code"]
+    return df[["lga_code", "quarter", value_col]]
 
+
+def load_abs_building_approvals(path: Path) -> pd.DataFrame:
+    """Parse ABS Regional LGA CSV into long-format building approvals.
+
+    Returns columns: lga_code (str), lga_name (str), quarter (pd.Period Q-JUN),
+    dwellings_approved (float).
+    """
+    df = _load_abs_regional(path, _BUILDING_APPROVALS_MEASURE, "dwellings_approved")
+    df["lga_name"] = df["lga_code"]
     return df[["lga_code", "lga_name", "quarter", "dwellings_approved"]]
 
 
-def download_all(out_dir: Path = RAW_DIR) -> None:
-    """Download all sources, parse building approvals, and save approvals_clean.parquet."""
-    print("Downloading RBA cash rate...")
-    download_rba_cash_rate(out_dir)
+def load_abs_population(path: Path) -> pd.DataFrame:
+    """Parse ABS Regional LGA CSV into long-format population (ERP_P_20).
 
+    Returns columns: lga_code (str), quarter (pd.Period Q-JUN), population (float).
+    """
+    return _load_abs_regional(path, _POPULATION_MEASURE, "population")
+
+
+def download_abs_ppi(out_dir: Path = RAW_DIR) -> Optional[Path]:
+    """Download ABS PPI Table 17 (Output of Construction Industries) xlsx.
+
+    Returns the saved path, or None if the download fails.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "ppi_construction.xlsx"
+    try:
+        out_path.write_bytes(_get(_ABS_PPI_CONSTRUCTION_URL, timeout=30))
+        print(f"Downloaded ABS PPI construction -> {out_path}")
+        return out_path
+    except Exception as e:
+        print(f"Warning: ABS PPI download failed ({e}). construction_cost_yoy will be 0.0.")
+        return None
+
+
+def load_abs_ppi(path: Path) -> Optional[pd.DataFrame]:
+    """Parse ABS PPI Table 17 xlsx (Data1 sheet) into a quarterly house construction index.
+
+    The Data1 sheet has series descriptions in row 0, 9 metadata rows (1-9),
+    then date rows from row 10 onward with datetime objects in column A.
+    Column 10 contains "3011 House construction Australia".
+
+    Returns columns: quarter (pd.Period), construction_cost_index (float).
+    Returns None if parsing fails.
+    """
+    try:
+        raw = pd.read_excel(path, sheet_name="Data1", header=None)
+
+        # Identify data start: first row where column A is a datetime object
+        data_start = None
+        for i in range(len(raw)):
+            val = raw.iloc[i, 0]
+            if hasattr(val, "year"):  # datetime / Timestamp
+                data_start = i
+                break
+
+        if data_start is None:
+            print("Warning: No datetime rows found in PPI Data1 sheet. Skipping.")
+            return None
+
+        # Find the "House construction Australia" column (row 0 headers)
+        headers = raw.iloc[0]
+        house_col_idx = 1  # fallback: national building construction
+        for j, h in enumerate(headers):
+            if "house construction australia" in str(h).lower():
+                house_col_idx = j
+                break
+
+        data = raw.iloc[data_start:, [0, house_col_idx]].copy()
+        data.columns = ["period_dt", "construction_cost_index"]
+        data["construction_cost_index"] = pd.to_numeric(
+            data["construction_cost_index"], errors="coerce"
+        )
+        data["quarter"] = pd.to_datetime(data["period_dt"], errors="coerce").dt.to_period("Q")
+        data = data.dropna(subset=["quarter", "construction_cost_index"])
+
+        if data.empty:
+            print("Warning: No valid data found in PPI Data1 sheet. Skipping.")
+            return None
+
+        print(
+            f"Loaded ABS PPI house construction: {len(data)} quarters, "
+            f"{data['quarter'].min()} to {data['quarter'].max()}"
+        )
+        return (
+            data[["quarter", "construction_cost_index"]]
+            .sort_values("quarter")
+            .reset_index(drop=True)
+        )
+
+    except Exception as e:
+        print(f"Warning: PPI xlsx parse failed ({e}). construction_cost_yoy will be 0.0.")
+        return None
+
+
+def download_all(out_dir: Path = RAW_DIR) -> None:
+    """Download all data sources and save processed parquet files."""
     print("Downloading ABS Regional LGA2020 CSV (FY2010-11 to FY2019-20)...")
     path_2020 = _download_abs_csv(_ABS_REGIONAL_LGA2020_CSV_URL, "abs_regional_lga2020.csv", out_dir)
 
     print("Downloading ABS Regional LGA2021 CSV (FY2020-21 to present)...")
     path_2021 = _download_abs_csv(_ABS_REGIONAL_LGA2021_CSV_URL, "abs_regional_lga2021.csv", out_dir)
 
+    # Building approvals
     print("Parsing and consolidating building approvals...")
     approvals = pd.concat(
         [load_abs_building_approvals(path_2020), load_abs_building_approvals(path_2021)],
@@ -138,6 +198,33 @@ def download_all(out_dir: Path = RAW_DIR) -> None:
     parquet_path = out_dir / "approvals_clean.parquet"
     approvals.to_parquet(parquet_path, index=False)
     print(f"Saved approvals_clean.parquet -> {parquet_path}  ({len(approvals):,} rows)")
+
+    # Population (ERP_P_20) — extracted from the already-downloaded CSVs
+    print("Extracting population (ERP) from ABS Regional CSVs...")
+    pop = pd.concat(
+        [load_abs_population(path_2020), load_abs_population(path_2021)],
+        ignore_index=True,
+    )
+    pop = (
+        pop
+        .drop_duplicates(subset=["lga_code", "quarter"])
+        .sort_values(["lga_code", "quarter"])
+        .reset_index(drop=True)
+    )
+    pop_path = out_dir / "population_clean.parquet"
+    pop.to_parquet(pop_path, index=False)
+    print(f"Saved population_clean.parquet -> {pop_path}  ({len(pop):,} rows)")
+
+    # PPI construction costs (best-effort)
+    print("Downloading ABS PPI construction costs (best-effort)...")
+    ppi_xlsx = download_abs_ppi(out_dir)
+    if ppi_xlsx is not None:
+        ppi_df = load_abs_ppi(ppi_xlsx)
+        if ppi_df is not None:
+            ppi_path = out_dir / "ppi_construction.parquet"
+            ppi_df.to_parquet(ppi_path, index=False)
+            print(f"Saved ppi_construction.parquet -> {ppi_path}  ({len(ppi_df)} rows)")
+
     print("All downloads complete.")
 
 

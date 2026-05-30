@@ -17,7 +17,7 @@ from models.registry import promote_to_champion
 
 load_dotenv()
 
-FEATURES_PATH = Path("data/raw/approvals_clean.parquet")
+FEATURES_PATH = Path("data/processed/features.parquet")
 TRAIN_END = "2022Q2"
 TEST_START = "2022Q3"
 HORIZON = 1
@@ -35,7 +35,7 @@ def compare_models(features_path: Path = FEATURES_PATH) -> None:
     train_mask = df["quarter"] <= TRAIN_END
     test_mask = df["quarter"] >= TEST_START
 
-    print("\n--- Model Comparison on Test Set (post-2022Q3 rate-hike period) ---\n")
+    print("\n--- Model Comparison on Test Set (post-2022Q3 post-Accord period) ---\n")
     results = {}
 
     # Seasonal mean

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
@@ -21,7 +20,7 @@ _MOCK_RESULT = ForecastResult(
 
 
 @pytest.fixture
-def client(tmp_path) -> Generator:
+def client() -> Generator:
     mock_logger = MagicMock()
     mock_logger.total_count.return_value = 5
 
@@ -50,11 +49,10 @@ def test_forecast_valid_request(client):
         "lga_code": "LGA12345",
         "features": {
             "approvals_lag1": 120.0,
-            "approvals_lag2": 115.0,
-            "approvals_lag3": 130.0,
-            "approvals_lag4": 110.0,
-            "cash_rate_lag1": 4.1,
-            "cash_rate_lag2": 3.85,
+            "population_growth_yoy": 0.015,
+            "construction_cost_yoy": 0.05,
+            "season_q2": 1,
+            "post_accord_2022": 1,
         },
     }
     response = client.post("/forecast", json=payload)
@@ -70,11 +68,8 @@ def test_forecast_returns_model_version(client):
         "lga_code": "LGA99999",
         "features": {
             "approvals_lag1": 50.0,
-            "approvals_lag2": 55.0,
-            "approvals_lag3": 60.0,
-            "approvals_lag4": 45.0,
-            "cash_rate_lag1": 0.1,
-            "cash_rate_lag2": 0.1,
+            "population_growth_yoy": 0.005,
+            "construction_cost_yoy": 0.02,
         },
     }
     response = client.post("/forecast", json=payload)
@@ -97,11 +92,8 @@ def test_batch_forecast_exceeds_limit(client):
             "lga_code": f"LGA{i:05d}",
             "features": {
                 "approvals_lag1": 100.0,
-                "approvals_lag2": 100.0,
-                "approvals_lag3": 100.0,
-                "approvals_lag4": 100.0,
-                "cash_rate_lag1": 4.1,
-                "cash_rate_lag2": 3.85,
+                "population_growth_yoy": 0.01,
+                "construction_cost_yoy": 0.04,
             },
         }
         for i in range(25)

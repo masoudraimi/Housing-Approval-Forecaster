@@ -60,7 +60,7 @@ class PredictionLogger:
         rows = list(self._db.execute(
             f"SELECT * FROM {_TABLE} ORDER BY timestamp DESC LIMIT ?", [n]
         ).fetchall())
-        cols = [col[0] for col in self._db.execute(f"PRAGMA table_info({_TABLE})").fetchall()]
+        cols = [col[1] for col in self._db.execute(f"PRAGMA table_info({_TABLE})").fetchall()]
         return [dict(zip(cols, row)) for row in rows]
 
     def get_recent_by_lga(self, lga_code: str, n: int = 100) -> list[dict]:
@@ -69,7 +69,7 @@ class PredictionLogger:
             f"SELECT * FROM {_TABLE} WHERE lga_code = ? ORDER BY timestamp DESC LIMIT ?",
             [lga_code, n],
         ).fetchall())
-        cols = [col[0] for col in self._db.execute(f"PRAGMA table_info({_TABLE})").fetchall()]
+        cols = [col[1] for col in self._db.execute(f"PRAGMA table_info({_TABLE})").fetchall()]
         return [dict(zip(cols, row)) for row in rows]
 
     def total_count(self) -> int:
