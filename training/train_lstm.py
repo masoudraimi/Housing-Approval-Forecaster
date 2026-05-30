@@ -33,19 +33,14 @@ PATIENCE = 10
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "housing-forecast-lstm")
 
 FEATURE_COLS = [
-    "approvals_lag1",
-    "approvals_lag2",
-    "approvals_lag3",
-    "approvals_lag4",
-    "cash_rate_lag1",
-    "cash_rate_lag2",
-    "construction_cost_yoy",
-    "population_growth_yoy",
+    "approvals_lag1",        # local planning momentum
+    "population_growth_yoy", # demand pressure from migration (ABS ERP)
+    "construction_cost_yoy", # supply constraint (ABS PPI house construction)
     "season_q1",
     "season_q2",
     "season_q3",
     "season_q4",
-    "post_rate_hike",
+    "post_accord_2022",      # planning policy break: National Housing Accord Aug 2022
 ]
 
 

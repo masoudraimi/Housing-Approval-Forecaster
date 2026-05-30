@@ -20,18 +20,13 @@ HORIZON = 4
 
 FEATURE_COLS = [
     "approvals_lag1",
-    "approvals_lag2",
-    "approvals_lag3",
-    "approvals_lag4",
-    "cash_rate_lag1",
-    "cash_rate_lag2",
-    "construction_cost_yoy",
     "population_growth_yoy",
+    "construction_cost_yoy",
     "season_q1",
     "season_q2",
     "season_q3",
     "season_q4",
-    "post_rate_hike",
+    "post_accord_2022",
 ]
 
 
@@ -39,18 +34,13 @@ class ForecastFeatures(BaseModel):
     """Input features for a single LGA forecast request."""
 
     approvals_lag1: float
-    approvals_lag2: float
-    approvals_lag3: float
-    approvals_lag4: float
-    cash_rate_lag1: float
-    cash_rate_lag2: float
-    construction_cost_yoy: float = 0.0
     population_growth_yoy: float = 0.0
+    construction_cost_yoy: float = 0.0
     season_q1: int = 0
     season_q2: int = 0
     season_q3: int = 0
     season_q4: int = 0
-    post_rate_hike: int = 0
+    post_accord_2022: int = 0
 
 
 class ForecastResult(BaseModel):
@@ -90,7 +80,7 @@ class Forecaster:
         client = mlflow.tracking.MlflowClient()
         try:
             alias_info = client.get_model_version_by_alias(MODEL_NAME, "champion")
-            self._model_version = alias_info.version
+            self._model_version = str(alias_info.version)
         except Exception:
             self._model_version = "champion"
 

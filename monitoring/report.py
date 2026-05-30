@@ -48,7 +48,7 @@ def generate_report(
 
     Panel 1: Predicted vs actual approvals (national aggregate)
     Panel 2: Rolling MAE over time with alert threshold
-    Panel 3: Cash rate vs training distribution bands
+    Panel 3: Construction cost YoY vs training distribution bands
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -101,27 +101,32 @@ def generate_report(
         ax2.text(0.5, 0.5, "No prediction log data", ha="center", va="center", transform=ax2.transAxes)
     ax2.set_ylabel("Mean Absolute Error")
 
-    # Panel 3: Cash rate vs training distribution
+    # Panel 3: Construction cost YoY vs training distribution
     ax3 = axes[2]
-    if not df.empty and "cash_rate" in df.columns and "quarter" in df.columns:
+    if not df.empty and "construction_cost_yoy" in df.columns and "post_accord_2022" in df.columns:
         df_sorted = df.drop_duplicates("quarter").sort_values("quarter").copy()
         df_sorted["quarter_dt"] = pd.to_datetime(df_sorted["quarter"])
-        train_rates = df_sorted[df_sorted["post_rate_hike"] == 0]["cash_rate"]
-        mean = train_rates.mean()
-        std = train_rates.std()
-        ax3.plot(df_sorted["quarter_dt"], df_sorted["cash_rate"], color="steelblue", label="Cash rate")
-        ax3.axhline(mean + _RESIDUAL_THRESHOLD_MULTIPLIER * std, color="red", linestyle="--", label="Drift upper bound")
-        ax3.axhline(mean - _RESIDUAL_THRESHOLD_MULTIPLIER * std, color="red", linestyle="--", label="Drift lower bound")
-        ax3.fill_between(df_sorted["quarter_dt"], mean - std, mean + std, alpha=0.1, color="green", label="Training mean +/-1 std")
-        rate_hike_start = df_sorted[df_sorted["post_rate_hike"] == 1]["quarter_dt"].min()
-        if pd.notna(rate_hike_start):
-            ax3.axvline(rate_hike_start, color="darkorange", linestyle=":", linewidth=2, label="Rate-hike structural break (Q3 2022)")
-        ax3.set_title("Feature Drift: Cash Rate vs Training Distribution")
+        train_costs = df_sorted[df_sorted["post_accord_2022"] == 0]["construction_cost_yoy"].dropna()
+        mean = train_costs.mean()
+        std = train_costs.std()
+        ax3.plot(df_sorted["quarter_dt"], df_sorted["construction_cost_yoy"],
+                 color="steelblue", label="Construction cost YoY")
+        ax3.axhline(mean + _RESIDUAL_THRESHOLD_MULTIPLIER * std, color="red", linestyle="--",
+                    label="Drift upper bound")
+        ax3.axhline(mean - _RESIDUAL_THRESHOLD_MULTIPLIER * std, color="red", linestyle="--",
+                    label="Drift lower bound")
+        ax3.fill_between(df_sorted["quarter_dt"], mean - std, mean + std,
+                         alpha=0.1, color="green", label="Training mean ±1 std")
+        accord_start = df_sorted[df_sorted["post_accord_2022"] == 1]["quarter_dt"].min()
+        if pd.notna(accord_start):
+            ax3.axvline(accord_start, color="darkorange", linestyle=":", linewidth=2,
+                        label="National Housing Accord (Q3 2022)")
+        ax3.set_title("Feature Drift: Construction Cost vs Pre-Accord Training Distribution")
         ax3.legend(fontsize=8)
     else:
         ax3.text(0.5, 0.5, "Feature data not available", ha="center", va="center", transform=ax3.transAxes)
-        ax3.set_title("Feature Drift: Cash Rate vs Training Distribution")
-    ax3.set_ylabel("RBA Cash Rate (%)")
+        ax3.set_title("Feature Drift: Construction Cost vs Training Distribution")
+    ax3.set_ylabel("House Construction Cost YoY (%)")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

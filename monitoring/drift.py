@@ -1,4 +1,4 @@
-"""Drift detection: feature drift (z-score on cash rate) and residual drift (rolling MAE)."""
+"""Drift detection: feature drift (z-score on construction costs) and residual drift (rolling MAE)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class DriftReport(BaseModel):
     mae_ratio: float
     residual_drift_detected: bool
     feature_drift_detected: bool
-    cash_rate_z_score: Optional[float]
+    cost_pressure_z_score: Optional[float]
     window_days: int
     n_predictions: int
 
@@ -83,26 +83,30 @@ def compute_rolling_mae(
 
 def detect_feature_drift(
     features_path: Path = FEATURES_PATH,
-    current_cash_rate: Optional[float] = None,
+    current_construction_cost_yoy: Optional[float] = None,
 ) -> tuple[bool, Optional[float]]:
-    """Check if the current cash rate is outside the training distribution.
+    """Check if the current construction cost growth is outside the training distribution.
 
+    Uses a z-score against the pre-Accord (pre-2022Q3) training distribution.
     Returns (drift_detected, z_score).
     """
-    if current_cash_rate is None:
+    if current_construction_cost_yoy is None:
         return False, None
 
     df = pd.read_parquet(features_path)
-    train_rates = df[df["post_rate_hike"] == 0]["cash_rate"].dropna()
-    if train_rates.empty:
+    if "construction_cost_yoy" not in df.columns or "post_accord_2022" not in df.columns:
         return False, None
 
-    mean = train_rates.mean()
-    std = train_rates.std()
+    baseline = df[df["post_accord_2022"] == 0]["construction_cost_yoy"].dropna()
+    if baseline.empty:
+        return False, None
+
+    mean = baseline.mean()
+    std = baseline.std()
     if std == 0:
         return False, 0.0
 
-    z = (current_cash_rate - mean) / std
+    z = (current_construction_cost_yoy - mean) / std
     return abs(z) > _FEATURE_DRIFT_Z_THRESHOLD, round(float(z), 3)
 
 
@@ -125,12 +129,12 @@ def detect_residual_drift(
 def generate_drift_report(
     baseline_mae: float,
     window_days: int = 90,
-    current_cash_rate: Optional[float] = None,
+    current_construction_cost_yoy: Optional[float] = None,
     db_path: Path = PREDICTION_LOG_PATH,
     features_path: Path = FEATURES_PATH,
 ) -> DriftReport:
     """Produce a full drift report combining feature and residual drift signals."""
-    feature_drift, z_score = detect_feature_drift(features_path, current_cash_rate)
+    feature_drift, z_score = detect_feature_drift(features_path, current_construction_cost_yoy)
     residual_drift, current_mae, n = detect_residual_drift(baseline_mae, window_days, db_path)
     return DriftReport(
         baseline_mae=baseline_mae,
@@ -138,7 +142,7 @@ def generate_drift_report(
         mae_ratio=round(current_mae / baseline_mae, 3) if baseline_mae > 0 else 0.0,
         residual_drift_detected=residual_drift,
         feature_drift_detected=feature_drift,
-        cash_rate_z_score=z_score,
+        cost_pressure_z_score=z_score,
         window_days=window_days,
         n_predictions=n,
     )
