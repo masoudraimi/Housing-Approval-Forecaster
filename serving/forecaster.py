@@ -80,7 +80,7 @@ class Forecaster:
         client = mlflow.tracking.MlflowClient()
         try:
             alias_info = client.get_model_version_by_alias(MODEL_NAME, "champion")
-            self._model_version = alias_info.version
+            self._model_version = str(alias_info.version)
         except Exception:
             self._model_version = "champion"
 

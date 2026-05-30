@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import sqlite3
+
 import sqlite_utils
 
 __all__ = ["PredictionLogger"]
@@ -20,7 +22,10 @@ class PredictionLogger:
 
     def __init__(self, db_path: Path = _DEFAULT_DB_PATH) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite_utils.Database(str(db_path))
+        # check_same_thread=False allows the connection to be used from FastAPI's
+        # thread pool without hitting the default single-thread guard.
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._db = sqlite_utils.Database(conn)
         self._ensure_table()
 
     def _ensure_table(self) -> None:
