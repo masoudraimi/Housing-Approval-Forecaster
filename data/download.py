@@ -65,8 +65,13 @@ def _load_abs_regional(path: Path, measure: str, value_col: str) -> pd.DataFrame
             )
         df = df[df["MEASURE"] == measure]
 
-    df = df[[lga_col, "TIME_PERIOD", "OBS_VALUE"]].copy()
-    df.columns = ["lga_code", "period_str", value_col]
+    # The REGION column carries the human-readable LGA name in both LGA2020 and LGA2021 CSVs.
+    has_name = "REGION" in df.columns
+    cols = [lga_col] + (["REGION"] if has_name else []) + ["TIME_PERIOD", "OBS_VALUE"]
+    df = df[cols].copy()
+    col_names = ["lga_code"] + (["lga_name"] if has_name else []) + ["period_str", value_col]
+    df.columns = col_names
+
     df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
     df = df.dropna(subset=[value_col, "lga_code"])
 
@@ -77,17 +82,21 @@ def _load_abs_regional(path: Path, measure: str, value_col: str) -> pd.DataFrame
 
     df["quarter"] = df["period_str"].apply(_to_period)
     df["lga_code"] = df["lga_code"].astype(str).str.extract(r"(\d+)")[0]
-    return df[["lga_code", "quarter", value_col]]
+
+    out_cols = ["lga_code"] + (["lga_name"] if has_name else []) + ["quarter", value_col]
+    return df[out_cols]
 
 
 def load_abs_building_approvals(path: Path) -> pd.DataFrame:
     """Parse ABS Regional LGA CSV into long-format building approvals.
 
     Returns columns: lga_code (str), lga_name (str), quarter (pd.Period Q-JUN),
-    dwellings_approved (float).
+    dwellings_approved (float).  lga_name comes from the REGION column in the CSV
+    (e.g. "Surf Coast", "Moree Plains (A)"); falls back to lga_code if absent.
     """
     df = _load_abs_regional(path, _BUILDING_APPROVALS_MEASURE, "dwellings_approved")
-    df["lga_name"] = df["lga_code"]
+    if "lga_name" not in df.columns:
+        df["lga_name"] = df["lga_code"]
     return df[["lga_code", "lga_name", "quarter", "dwellings_approved"]]
 
 
@@ -185,16 +194,20 @@ def download_all(out_dir: Path = RAW_DIR) -> None:
 
     # Building approvals
     print("Parsing and consolidating building approvals...")
-    approvals = pd.concat(
-        [load_abs_building_approvals(path_2020), load_abs_building_approvals(path_2021)],
-        ignore_index=True,
-    )
+    ap20 = load_abs_building_approvals(path_2020)
+    ap21 = load_abs_building_approvals(path_2021)
+    approvals = pd.concat([ap20, ap21], ignore_index=True)
     approvals = (
         approvals
         .drop_duplicates(subset=["lga_code", "quarter"])
         .sort_values(["lga_code", "quarter"])
         .reset_index(drop=True)
     )
+    # LGA2021 uses cleaner names (no "(C)"/"(A)" type suffixes); prefer those for
+    # any code that appears in both editions so the whole series uses one name.
+    preferred_names = ap21.drop_duplicates("lga_code").set_index("lga_code")["lga_name"]
+    approvals["lga_name"] = approvals["lga_code"].map(preferred_names).fillna(approvals["lga_name"])
+
     parquet_path = out_dir / "approvals_clean.parquet"
     approvals.to_parquet(parquet_path, index=False)
     print(f"Saved approvals_clean.parquet -> {parquet_path}  ({len(approvals):,} rows)")
