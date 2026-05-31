@@ -45,6 +45,7 @@ data/processed/
 *.png
 *.pdf
 reports/
+!assets/*.png
 
 # OS
 .DS_Store
