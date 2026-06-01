@@ -28,36 +28,40 @@ Quarterly dwelling approvals per Local Government Area (LGA), 4-quarter horizon.
 
 ## Architecture
 
-```
-ABS LGA2020/2021             ABS ERP (population)       ABS PPI (construction)
-(building approvals)         measure ERP_P_20            Table 17: house construction
-        |                           |                           |
-        +-----------> data/pipeline.py <-----------------------+
-                               |
-                        features.parquet
-                        3,371 rows × 13 cols
-                               |
-             +-----------------+------------------+
-             |                 |                  |
-training/train_baseline.py     |     training/train_lstm.py
-(SARIMA + seasonal mean)       |     (PyTorch LSTM, 8 features)
-             |                 |                  |
-             +---------+-------+----------+--------+
-                       |
-                MLflow Registry
-                @champion alias
-                       |
-              serving/forecaster.py
-                       |
-              FastAPI (port 8000)
-              /forecast  /health  /info
-                       |
-              serving/logger.py
-              (SQLite prediction log)
-                       |
-           monitoring/drift.py
-           feature drift (construction cost z-score)
-           + residual drift (rolling MAE vs baseline)
+```mermaid
+flowchart TD
+    subgraph ingest["Data Ingestion"]
+        A1["ABS LGA2020/21\nBuilding Approvals"]
+        A2["ABS ERP\nPopulation (LGA)"]
+        A3["ABS PPI\nConstruction Costs"]
+    end
+
+    B["data/pipeline.py\nfeatures.parquet\n528 LGAs x 7 yrs x 13 cols"]
+
+    subgraph train["Model Training"]
+        C1["Seasonal Mean"]
+        C2["SARIMA(1,1,1)(0,1,1,4)"]
+        C3["PyTorch LSTM\n2-layer h=64"]
+    end
+
+    D["MLflow Registry\n@champion alias"]
+
+    subgraph serve["Serving"]
+        E["FastAPI :8000\n/forecast  /health"]
+        F["SQLite\nPrediction Log"]
+    end
+
+    subgraph monitor["Drift Monitoring"]
+        G["Feature Drift\nconstruction cost z-score > 2.5σ"]
+        H["Residual Drift\nrolling MAE > 1.5x baseline"]
+    end
+
+    A1 & A2 & A3 --> B
+    B --> C1 & C2 & C3
+    C1 & C2 & C3 --> D
+    D --> E
+    E --> F
+    F --> G & H
 ```
 
 ## Model Comparison
@@ -73,6 +77,12 @@ Results on held-out test set (post 2022Q2, post-Accord period):
 The seasonal mean baseline wins on all three metrics. See `notebooks/03_project_showcase.ipynb` for a full explanation of why: evaluation asymmetry, dominant lag signal, and cross-sectional LSTM training are the main factors.
 
 ![Model Comparison](assets/03_model_comparison.png)
+
+### Forecast vs Actuals
+
+Four sample LGAs at the 10th, 35th, 65th, and 90th percentile of average approval volume. Blue = training history, orange = test actuals, green = seasonal mean forecast.
+
+![Forecast vs Actuals](assets/03_forecast_vs_actuals.png)
 
 ## Key Findings
 
@@ -114,6 +124,12 @@ This project's monitoring layer catches that in two ways:
 ![Feature Drift](assets/02_feature_drift.png)
 
 See `notebooks/02_drift_case_study.ipynb` for the full case study with annotated charts.
+
+## API
+
+The FastAPI server exposes interactive docs at `http://localhost:8000/docs`. All endpoints are typed with Pydantic; the `/forecast` endpoint accepts an LGA code and feature vector and returns a 4-quarter prediction.
+
+![FastAPI Docs](assets/screenshot_fastapi_docs.png)
 
 ## Quick Start
 
@@ -193,6 +209,31 @@ curl http://localhost:8000/health
 | ABS PPI 6427.0 Table 17 | House construction output price index | National | `construction_cost_yoy` |
 
 All sources are free, publicly available, and require no authentication. The ABS Regional CSVs are large (~300 MB each) but are downloaded once and reused for both approvals and population.
+
+## Limitations and Next Steps
+
+### Current limitations
+
+**Data frequency.** ABS publishes LGA building approvals annually (by financial year). Each row is one LGA x financial year, mapped to Q2. There is no true quarterly granularity at the LGA level, which limits sequence modelling, the LSTM sees one observation per LGA per year, not per quarter.
+
+**Dataset size.** 528 LGAs x 7 years = 3,371 rows. Deep learning models rarely outperform well-tuned statistical baselines at this scale. The LSTM's recurrence is wasted when trained with `seq_len=1`.
+
+**Evaluation asymmetry.** The baselines were evaluated on a temporal hold-out (post-2022Q2, including the structural break). The LSTM used a cross-sectional 80/20 LGA split with no temporal hold-out. The metrics are not directly comparable; the LSTM may actually perform better or worse than the table implies under a fair comparison.
+
+**Point forecasts only.** The model produces a single predicted value per LGA per quarter. Planning decisions benefit from uncertainty bounds; there is no conformal interval or prediction interval implemented.
+
+**National cost signal.** `construction_cost_yoy` is the national ABS PPI index. Local cost variation (labour shortages in outer Sydney vs inner Melbourne, transport cost differences) is not captured.
+
+**Supply does not imply affordability.** Approval forecasts are a leading indicator of new supply, not a predictor of prices. Auckland's decade of upzoning produced record approval volumes while median prices stayed near NZ$1M.
+
+### What would improve the model
+
+1. **True quarterly LGA data.** State-level quarterly approvals could bridge the gap, enabling `seq_len > 1` for the LSTM and proper temporal evaluation.
+2. **Re-evaluate LSTM with temporal split.** Fix the evaluation asymmetry to get an honest apples-to-apples comparison before writing off the LSTM.
+3. **Conformal prediction intervals.** Wrap the champion model with a split conformal predictor to produce calibrated uncertainty bounds per LGA.
+4. **Per-LGA drift alerts.** Current drift detection is global. Individual councils can experience structural breaks (large rezoning, infrastructure announcement) that a national signal misses.
+5. **Planning reform features.** Zoning amendment data and state planning policy changes would give the model access to the policy signal it currently only approximates via `post_accord_2022`.
+6. **Completion-lag model.** Chain the approval forecast with an empirical approval-to-completion delay distribution (typically 12–24 months) to project actual dwelling additions to stock.
 
 ## Why This Exists
 
